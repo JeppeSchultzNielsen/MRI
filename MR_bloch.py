@@ -24,7 +24,7 @@ plt.figure(figsize = (5.8, 5.8))
 
 
 t0 = 0
-dt = 0.0001 #ms
+dt = 1e-4 #ms
 T1 = T2 = 1000 #ms
 
 def bloch_solve_prime(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
@@ -38,6 +38,18 @@ def bloch_solve_prime(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in pri
     for i in range(1,n):
         M[i] = M[i-1] + dt * (np.matmul(B_mat,M[i-1]) + np.array([0, 0, M0/T1]))
     return M
+def bloch_solve_prime_time(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
+    #n = int((T-t0)/dt)
+    n = len(d_omega)
+    M = np.zeros((n,3))
+    M0 = np.linalg.norm(M_init) ## Maybe?
+    M[0] = M_init
+    for i in range(1,n):
+        B_mat = np.array([[-1/T2,                       d_omega[i-1],                -omega1[i-1]*np.sin(phi)],
+                          [-d_omega[i-1],              -1/T2,                         omega1[i-1]*np.cos(phi)],
+                          [ omega1[i-1]*np.sin(phi),   -omega1[i-1]*np.cos(phi),     -1/T1]])
+        M[i] = M[i-1] + dt * (np.matmul(B_mat,M[i-1]) + np.array([0, 0, M0/T1]))
+    return M
 
 gamma = 2.675e8 #T^-1 s^-1
 
@@ -45,8 +57,9 @@ def gradient(t_w, delta_x=2): #delta_x in mm
     return 2*np.pi/(gamma*t_w*delta_x)
 def delta_omega(x,t_w):
     return gamma * gradient(t_w) * x
+
 M_in = np.array([0., 0., 1.])
-M_sol = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_omega(100,1), 0, 1)
+M_sol = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_omega(0,1), 0, 1)
 
 # Collecting data
 data = M_sol[0::10].T #Only every 10 datapoints for faster animation
@@ -109,7 +122,7 @@ def RF_pulse(t, b1, t_w, n_z):
 def M_plus(M_p0, t, omega0, T2):
     return M_p0 * np.exp(-t*T2) * np.exp(-np.imag*omega0*t)
 
-ts = np.linspace(-10,10, 1000)
+ts = np.arange(-1, 10, dt)
 #plt.plot(ts, RF_pulse(ts, 1, 1, 10))
 #plt.show()
 
@@ -124,4 +137,10 @@ def mag_prof(grad_str = 1):
 #plt.plot(xs, mag_prof())
 #plt.show()
 #plt.savefig('')
+#plot_A()
+print(RF_pulse(ts, 10e-6, 1, 1))
+#M_sol = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts, 10e-6, 1, 1), np.zeros(int((10+1)/dt)), 0, 1)
+# Collecting data
+#data = M_sol[0::10].T #Only every 10 datapoints for faster animation
+#new_data = np.concatenate((np.zeros(np.shape(data)), data))
 plot_A()
