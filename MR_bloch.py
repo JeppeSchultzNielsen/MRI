@@ -1,5 +1,6 @@
 import numpy as np
 import scipy as sp
+from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import mpl_toolkits.mplot3d.axes3d as p3
@@ -40,18 +41,48 @@ def bloch_solve_prime(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in pri
     return M
 def bloch_solve_prime_time(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
     #n = int((T-t0)/dt)
-    n = len(d_omega)
+    n = len(omega1)
     M = np.zeros((n,3))
     M0 = np.linalg.norm(M_init) ## Maybe?
     M[0] = M_init
     for i in range(1,n):
-        B_mat = np.array([[-1/T2,                       d_omega[i-1],                -omega1[i-1]*np.sin(phi)],
-                          [-d_omega[i-1],              -1/T2,                         omega1[i-1]*np.cos(phi)],
+        B_mat = np.array([[-1/T2,                       d_omega,                     -omega1[i-1]*np.sin(phi)],
+                          [-d_omega,                   -1/T2,                         omega1[i-1]*np.cos(phi)],
                           [ omega1[i-1]*np.sin(phi),   -omega1[i-1]*np.cos(phi),     -1/T1]])
         M[i] = M[i-1] + dt * (np.matmul(B_mat,M[i-1]) + np.array([0, 0, M0/T1]))
     return M
 
-gamma = 2.675e8 #T^-1 s^-1
+def bloch_solve_prime_pysolve(M_init, T1, T2, b1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
+    t0 = -1
+    gamma = 2.675e5 #T^-1 ms^-1
+    M0 = np.linalg.norm(M_init) ## Maybe?
+    #d_omega = None #????
+    def omega1(t): return gamma*RF_pulse_prime(t, b1, 1, 1)
+    #def omega1(t): return np.pi/2
+    def fun(t, y):
+        #return np.matmul(np.array([[-1/T2,                        d_omega,                   -omega1(t)*np.sin(phi)],
+        #                           [-d_omega,                    -1/T2,                       omega1(t)*np.cos(phi)],
+        #                           [ omega1(t)*np.sin(phi),      -omega1(t)*np.cos(phi),     -1/T1]])
+        #                          ,y) + np.array([0, 0, M0/T1])
+        return np.array([-y[0]/T2 + d_omega*y[1] - omega1(t)*np.sin(phi)*y[2],
+                         -d_omega*y[0] - y[1]/T2 + omega1(t)*np.cos(phi)*y[2],
+                          omega1(t)*np.sin(phi)*y[0] - omega1(t)*np.cos(phi)*y[1] - (y[2]-M0)/T1])
+    solve_ts = np.arange(t0, T, dt)
+    sol = solve_ivp(fun, [t0,T], M_init, t_eval = solve_ts)
+    return np.array(sol.t), np.array(sol.y)
+
+def RF_pulse_prime(t, b1, t_w, n_z):
+    t_rf = n_z*t_w
+    if -0.5*t_rf <= t and t <= 0.5*t_rf:
+        B1 = b1*np.sinc(2*np.pi*t/t_w)
+    else:
+        B1 = 0
+    return B1
+test_time, test_dat = bloch_solve_prime_pysolve(np.array([0,0,1]), T1, T2, 10e-6, 0, 0, 1)
+print(test_time, test_dat)
+test_time = test_time[0::10]
+
+gamma = 2.675e5 #T^-1 ms^-1
 
 def gradient(t_w, delta_x=2): #delta_x in mm
     return 2*np.pi/(gamma*t_w*delta_x)
@@ -60,21 +91,31 @@ def delta_omega(x,t_w):
 
 M_in = np.array([0., 0., 1.])
 M_sol = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_omega(0,1), 0, 1)
+print("test_dat shape and M_sol shape", np.shape(test_dat), np.shape(M_sol))
 
 # Collecting data
 data = M_sol[0::10].T #Only every 10 datapoints for faster animation
+new_data_k = np.concatenate((np.zeros(np.shape(data)), data))
+data = test_dat.T[0::10].T #Only every 10 datapoints for faster animation
+print(np.shape(data))
 new_data = np.concatenate((np.zeros(np.shape(data)), data))
+print(np.shape(new_data),np.shape(new_data_k))
 
 #///////////////////////// Plotting
-def plot_A(): 
+def plot_A(time, data): 
     # Attaching 3D axis to the figure
     fig = plt.figure()
     ax = p3.Axes3D(fig)
-    quiver = ax.quiver(*new_data[:,0])
+    quiver = ax.quiver(*data[:,0])
+    text = ax.text(0,0,0,f"{round(time[0],5)}")
     def update(id):
         nonlocal quiver
+        nonlocal text
         quiver.remove()
-        quiver = ax.quiver(*new_data[:,int(id)])
+        text.remove()
+
+        text = ax.text(0,0,0,f"{round(time[int(id)],5)}")
+        quiver = ax.quiver(*data[:,int(id)])
     # Setting the axes properties
     ax.set_xlim3d([-1.2, 1.2])
     ax.set_xlabel('X')
@@ -101,12 +142,13 @@ def plot_A():
 #/////////////////////////
 
 #B
-gamma = 2.675e8 #T^-1 s^-1
+gamma = 2.675e5 #T^-1 ms^-1
 
 def gradient(t_w, delta_x=2): #delta_x in mm
     return 2*np.pi/(gamma*t_w*delta_x)
-def delta_omega(x,t_w):
-    return gamma * gradient(t_w) * x
+def delta_omega(x,t_w, delta_x = 2):
+    return 2*np.pi*x/(t_w*delta_x)
+    #return gamma * gradient(t_w) * x
 
 def RF_pulse(t, b1, t_w, n_z):
     t_rf = n_z*t_w
@@ -122,7 +164,8 @@ def RF_pulse(t, b1, t_w, n_z):
 def M_plus(M_p0, t, omega0, T2):
     return M_p0 * np.exp(-t*T2) * np.exp(-np.imag*omega0*t)
 
-ts = np.arange(-1, 10, dt)
+ts = np.arange(-1, 1, dt)
+test_time = ts
 #plt.plot(ts, RF_pulse(ts, 1, 1, 10))
 #plt.show()
 
@@ -134,13 +177,23 @@ def mag_prof(grad_str = 1):
         mx, my = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_om, 0, 1)[-1][0:2]
         mags.append(np.sqrt(mx**2+my**2))
     return mags
-#plt.plot(xs, mag_prof())
+def mag_prof_time(grad_str = 1):
+    mags = []
+    ts = np.arange(-0.5,0.5,dt)
+    for x in xs:
+        delta_om = grad_str*delta_omega(x,1)
+        mx, my = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts,10e-6,1,1), delta_om, 0, 1)[-1][0:2]
+        mags.append(np.sqrt(mx**2+my**2))
+    return mags
+
+#plt.plot(xs, mag_prof_time(2))
 #plt.show()
 #plt.savefig('')
 #plot_A()
-print(RF_pulse(ts, 10e-6, 1, 1))
-#M_sol = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts, 10e-6, 1, 1), np.zeros(int((10+1)/dt)), 0, 1)
+M_sol = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts, 10e-6, 1, 1), delta_omega(100,1), 0, 1)
 # Collecting data
-#data = M_sol[0::10].T #Only every 10 datapoints for faster animation
-#new_data = np.concatenate((np.zeros(np.shape(data)), data))
-plot_A()
+data = M_sol[0::10].T #Only every 10 datapoints for faster animation
+test_time = test_time[0::10]
+new_data = np.concatenate((np.zeros(np.shape(data)), data))
+print(np.linalg.norm(M_sol[-1]), M_sol[-1])
+#plot_A(test_time, new_data)
