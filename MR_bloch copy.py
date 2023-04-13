@@ -21,24 +21,14 @@ plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 plt.figure(figsize = (5.8, 5.8))
-#### Plot definitions END 
+#### Plot definitions end 
 
-gamma = 2.675e5 #T^-1 ms^-1
-t0 = -1
-T = 1
+
+t0 = 0
 dt = 1e-4 #ms
 T1 = T2 = 1000 #ms
-M_in = np.array([0., 0., 1.])
-ts = np.arange(-t0, T, dt)
-xs = np.arange(-100,100,2)
 
-def gradient(t_w, delta_x=2): #delta_x in mm
-    return 2*np.pi/(gamma*t_w*delta_x)
-def delta_omega(x,t_w, delta_x = 2):
-    return 2*np.pi*x/(t_w*delta_x)
-    #return gamma * gradient(t_w) * x
-
-def bloch_solve_prime(M_init, T1, T2, omega1, d_omega, phi): # Solving in primed coordinate system (hopefully?)
+def bloch_solve_prime(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
     n = int((T-t0)/dt)
     M = np.zeros((n,3))
     M0 = np.linalg.norm(M_init) ## Maybe?
@@ -49,8 +39,7 @@ def bloch_solve_prime(M_init, T1, T2, omega1, d_omega, phi): # Solving in primed
     for i in range(1,n):
         M[i] = M[i-1] + dt * (np.matmul(B_mat,M[i-1]) + np.array([0, 0, M0/T1]))
     return M
-
-def bloch_solve_prime_time(M_init, T1, T2, omega1, d_omega, phi): # Solving in primed coordinate system (hopefully?)
+def bloch_solve_prime_time(M_init, T1, T2, omega1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
     #n = int((T-t0)/dt)
     n = len(omega1)
     M = np.zeros((n,3))
@@ -63,17 +52,23 @@ def bloch_solve_prime_time(M_init, T1, T2, omega1, d_omega, phi): # Solving in p
         M[i] = M[i-1] + dt * (np.matmul(B_mat,M[i-1]) + np.array([0, 0, M0/T1]))
     return M
 
-def bloch_solve_prime_pysolve(M_init, T1, T2, b1, d_omega, phi, t_w=1, n_z=1): # Solving in primed coordinate system (hopefully?)
+def bloch_solve_prime_pysolve(M_init, T1, T2, b1, d_omega, phi, T): # Solving in primed coordinate system (hopefully?)
+    t0 = -1
+    gamma = 2.675e5 #T^-1 ms^-1
     M0 = np.linalg.norm(M_init) ## Maybe?
-    def omega1(t): 
-        return gamma*RF_pulse_prime(t, b1, t_w, n_z)
+    #d_omega = None #????
+    def omega1(t): return gamma*RF_pulse_prime(t, b1, 1, 1)
+    #def omega1(t): return np.pi/2
     def fun(t, y):
         return np.matmul(np.array([[-1/T2,                        d_omega,                   -omega1(t)*np.sin(phi)],
                                    [-d_omega,                    -1/T2,                       omega1(t)*np.cos(phi)],
                                    [ omega1(t)*np.sin(phi),      -omega1(t)*np.cos(phi),     -1/T1]])
-                        ,y) + np.array([0, 0, M0/T1])
+                                  ,y) + np.array([0, 0, M0/T1])
+        #return np.array([-y[0]/T2 + d_omega*y[1] - omega1(t)*np.sin(phi)*y[2],
+        #                 -d_omega*y[0] - y[1]/T2 + omega1(t)*np.cos(phi)*y[2],
+        #                  omega1(t)*np.sin(phi)*y[0] - omega1(t)*np.cos(phi)*y[1] - (y[2]-M0)/T1])
     solve_ts = np.arange(t0, T, dt)
-    sol = solve_ivp(fun, [t0,T], M_init, t_eval = solve_ts)
+    sol = solve_ivp(fun, [t0,T], M_init, t_eval = solve_ts, rtol = 1e-5, atol = 1e-8)
     return np.array(sol.t), np.array(sol.y)
 
 def RF_pulse_prime(t, b1, t_w, n_z):
@@ -83,6 +78,28 @@ def RF_pulse_prime(t, b1, t_w, n_z):
     else:
         B1 = 0
     return B1
+test_time, test_dat = bloch_solve_prime_pysolve(np.array([0,0,1]), T1, T2, 10e-6, 0, 0, 1)
+print(test_time, test_dat)
+test_time = test_time[0::10]
+
+gamma = 2.675e5 #T^-1 ms^-1
+
+def gradient(t_w, delta_x=2): #delta_x in mm
+    return 2*np.pi/(gamma*t_w*delta_x)
+def delta_omega(x,t_w):
+    return gamma * gradient(t_w) * x
+
+M_in = np.array([0., 0., 1.])
+M_sol = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_omega(0,1), 0, 1)
+print("test_dat shape and M_sol shape", np.shape(test_dat), np.shape(M_sol))
+
+# Collecting data
+data = M_sol[0::10].T #Only every 10 datapoints for faster animation
+new_data_k = np.concatenate((np.zeros(np.shape(data)), data))
+data = test_dat.T[0::10].T #Only every 10 datapoints for faster animation
+print(np.shape(data))
+new_data = np.concatenate((np.zeros(np.shape(data)), data))
+print(np.shape(new_data),np.shape(new_data_k))
 
 #///////////////////////// Plotting
 def plot_A(time, data): 
@@ -118,13 +135,21 @@ def plot_A(time, data):
     # END-SPHERE
 
     # Creating the Animation object
-    datanums = np.linspace(0,np.shape(data)[1]-1,np.shape(data)[1])
+    datanums = np.linspace(0,np.shape(data)[1]-1,1000)#np.shape(data)[1])
     vec_ani = animation.FuncAnimation(fig, update, frames=datanums, interval = 1)
 
     plt.show()
 #/////////////////////////
 
 #B
+gamma = 2.675e5 #T^-1 ms^-1
+
+def gradient(t_w, delta_x=2): #delta_x in mm
+    return 2*np.pi/(gamma*t_w*delta_x)
+def delta_omega(x,t_w, delta_x = 2):
+    return 2*np.pi*x/(t_w*delta_x)
+    #return gamma * gradient(t_w) * x
+
 def RF_pulse(t, b1, t_w, n_z):
     t_rf = n_z*t_w
     n = len(t)
@@ -136,6 +161,15 @@ def RF_pulse(t, b1, t_w, n_z):
             B1[i] = 0
     return B1
 
+def M_plus(M_p0, t, omega0, T2):
+    return M_p0 * np.exp(-t*T2) * np.exp(-np.imag*omega0*t)
+
+ts = np.arange(-1, 1, dt)
+#test_time = ts
+#plt.plot(ts, RF_pulse(ts, 1, 1, 10))
+#plt.show()
+
+xs = np.arange(-100,100,2)
 def mag_prof(grad_str = 1):
     mags = []
     for x in xs:
@@ -143,41 +177,23 @@ def mag_prof(grad_str = 1):
         mx, my = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_om, 0, 1)[-1][0:2]
         mags.append(np.sqrt(mx**2+my**2))
     return mags
-def mag_prof_time(grad_str = 1, t_w = 1, n_z = 1): # Magnitude profile
+def mag_prof_time(grad_str = 1):
     mags = []
     ts = np.arange(-0.5,0.5,dt)
     for x in xs:
-        delta_om = grad_str*delta_omega(x,t_w)
-        mx, my = bloch_solve_prime_pysolve(M_in, T1, T2, 10e-6, delta_om, 0, t_w, n_z)[1].T[-1][0:2]
-        #mx, my = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts,10e-6,1,1), delta_om, 0)[-1][0:2]
+        delta_om = grad_str*delta_omega(x,1)
+        mx, my = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts,10e-6,1,1), delta_om, 0, 1)[-1][0:2]
         mags.append(np.sqrt(mx**2+my**2))
     return mags
 
-### NOTE PLOTTING PROBLEM A ################
+#plt.plot(xs, mag_prof_time(0.5))
+#plt.show()
+#plt.savefig('')
+#plot_A()
+M_sol = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts, 10e-6, 1, 1), delta_omega(100,1), 0, 1)
 # Collecting data
-test_time, test_dat = bloch_solve_prime_pysolve(M_in, T1, T2, 10e-6, delta_omega(200,1), 0)
-data = test_dat.T[0::10].T #Only every 10 datapoints for faster animation
-new_data = np.concatenate((np.zeros(np.shape(data)), data)) # Adding points at 0 for plotting arrow
-test_time = test_time[0::10]
-
-### NOTE Getting data without carying about time-dependency of B-field.
-#M_sol = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_omega(0,1), 0)
-
-### NOTE Geting data for A with time-dependent B-field. Magnitude of 10µT.
-#M_sol = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts, 10e-6, 1, 1), delta_omega(100,1), 0)
-#test_time = ts
 #data = M_sol[0::10].T #Only every 10 datapoints for faster animation
-
 #test_time = test_time[0::10]
 #new_data = np.concatenate((np.zeros(np.shape(data)), data))
-
-#plot_A(test_time, new_data) ## NOTE COMMENT THIS OUT TO PLOT
-############################################# END PLOTTING OF A
-
-### PLOTTING FIGURE 1 FROM EX.
-#plt.plot(ts, RF_pulse(ts, 1, 1, 10))
-#plt.show()
-
-### NOTE PLOTTING PROBLEM B2 AND B3 (ADAPTIVE)
-plt.plot(xs, mag_prof_time(1, 1, 1))
-plt.show()
+#print(np.linalg.norm(M_sol[-1]), M_sol[-1])
+plot_A(test_time, new_data)
