@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import mpl_toolkits.mplot3d.axes3d as p3
 
+from phantominator import shepp_logan
+
 ### Plot definitions
 SMALL_SIZE = 16
 MEDIUM_SIZE = 18
@@ -28,9 +30,13 @@ t0 = -1
 T = 1
 dt = 1e-4 #ms
 T1 = T2 = 1000 #ms
+T_E = 16 #ms
+T_R = 35 #ms
+N = 128
+L = 100 #mm
 M_in = np.array([0., 0., 1.])
 ts = np.arange(-t0, T, dt)
-xs = np.arange(-100,100,2)
+xs = np.arange(-L,L,2)
 
 def gradient(t_w, delta_x=2): #delta_x in mm
     return 2*np.pi/(gamma*t_w*delta_x)
@@ -138,11 +144,15 @@ def RF_pulse(t, b1, t_w, n_z):
 
 def mag_prof(grad_str = 1):
     mags = []
-    for x in xs:
+    M_comps = np.zeros([len(xs),2])
+    for i in range(len(xs)):
+        x = xs[i]
         delta_om = grad_str*delta_omega(x,1)
-        mx, my = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_om, 0, 1)[-1][0:2]
+        mx, my = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_om, 0)[-1][0:2]
         mags.append(np.sqrt(mx**2+my**2))
-    return mags
+        M_comps[i,0] = mx
+        M_comps[i,1] = my
+    return mags, M_comps
 def mag_prof_time(grad_str = 1, t_w = 1, n_z = 1): # Magnitude profile
     mags = []
     ts = np.arange(-0.5,0.5,dt)
@@ -153,7 +163,7 @@ def mag_prof_time(grad_str = 1, t_w = 1, n_z = 1): # Magnitude profile
         mags.append(np.sqrt(mx**2+my**2))
     return mags
 
-### NOTE PLOTTING PROBLEM A ################
+### NOTE PLOTTING PROBLEM 1 ################
 # Collecting data
 test_time, test_dat = bloch_solve_prime_pysolve(M_in, T1, T2, 10e-6, delta_omega(200,1), 0)
 data = test_dat.T[0::10].T #Only every 10 datapoints for faster animation
@@ -163,7 +173,7 @@ test_time = test_time[0::10]
 ### NOTE Getting data without carying about time-dependency of B-field.
 #M_sol = bloch_solve_prime(M_in, T1, T2, np.pi/2, delta_omega(0,1), 0)
 
-### NOTE Geting data for A with time-dependent B-field. Magnitude of 10µT.
+### NOTE Geting data for ex 1 with time-dependent B-field. Magnitude of 10µT.
 #M_sol = bloch_solve_prime_time(M_in, T1, T2, gamma*RF_pulse(ts, 10e-6, 1, 1), delta_omega(100,1), 0)
 #test_time = ts
 #data = M_sol[0::10].T #Only every 10 datapoints for faster animation
@@ -172,12 +182,36 @@ test_time = test_time[0::10]
 #new_data = np.concatenate((np.zeros(np.shape(data)), data))
 
 #plot_A(test_time, new_data) ## NOTE COMMENT THIS OUT TO PLOT
-############################################# END PLOTTING OF A
+############################################# END PLOTTING OF PROBLEM 1
 
 ### PLOTTING FIGURE 1 FROM EX.
 #plt.plot(ts, RF_pulse(ts, 1, 1, 10))
 #plt.show()
 
-### NOTE PLOTTING PROBLEM B2 AND B3 (ADAPTIVE)
-plt.plot(xs, mag_prof_time(1, 1, 1))
+### NOTE PLOTTING PROBLEM 2.2 AND 2.3 (ADAPTIVE)
+#plt.plot(xs, mag_prof_time(1, 1, 1))
+#plt.show()
+
+
+### NOTE EXERCISE 3
+M0 = np.abs(shepp_logan(N)[64])
+### NOTE Gives figure 3.
+#plt.plot(np.linspace(0,40,len(M0)), M0)
+#plt.show()
+
+### NOTE Plot slice image.
+import seaborn as sb
+#sb.heatmap(shepp_logan(N))
+#plt.show()
+
+### NOTE Comparison - doesn't work yet.
+xs = np.arange(-0,100,2)
+comps = mag_prof()[1] # Using simple Euler integration, because out solver using solve_ivp does not allow instantaneous pi/2-pulse.
+# Maybe necessary to update solving functions to allow better t=0 pi/2 pulse? Should gradient be changed?
+Mp_x0 = comps[:,0] + 1j*(comps[:,1]) # Making M_+(x,t=0)
+print(Mp_x0)
+plt.plot(xs, np.fft.ifft(Mp_x0*np.exp(-T_E/T2)))
 plt.show()
+
+def T2(x, a= 0.5): # For final problem
+    return 15 + a*x
