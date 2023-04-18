@@ -6,6 +6,7 @@ import matplotlib.animation as animation
 import mpl_toolkits.mplot3d.axes3d as p3
 
 from phantominator import shepp_logan
+from phantominator import mr_shepp_logan
 
 ### Plot definitions
 SMALL_SIZE = 16
@@ -204,14 +205,60 @@ import seaborn as sb
 #sb.heatmap(shepp_logan(N))
 #plt.show()
 
-### NOTE Comparison - doesn't work yet.
-xs = np.arange(-0,100,2)
-comps = mag_prof()[1] # Using simple Euler integration, because out solver using solve_ivp does not allow instantaneous pi/2-pulse.
-# Maybe necessary to update solving functions to allow better t=0 pi/2 pulse? Should gradient be changed?
-Mp_x0 = comps[:,0] + 1j*(comps[:,1]) # Making M_+(x,t=0)
-print(Mp_x0)
-plt.plot(xs, np.fft.ifft(Mp_x0*np.exp(-T_E/T2)))
-plt.show()
-
-def T2(x, a= 0.5): # For final problem
+def T_2(x, a= 0.05): # For final problem
     return 15 + a*x
+
+def sig(t):
+    sum = 0
+    t_g = 10
+    for i in range(N):
+        sum += M0[i]*np.exp(-T_E/T2-1j*gamma*gradient(1)*(t-t_g-T_E)*i)
+        #sum += np.exp(-T_E/T_2(i)-1j*gamma*gradient(1)*(t-t_g-T_E)*i)
+    return sum
+
+ts = np.linspace(0.5*T_E, 1.5*T_E, 1000)
+signal = sig(ts)
+
+#print(signal)
+#plt.plot(ts, np.absolute(signal))
+#plt.plot(ts, np.absolute(np.fft.fft(M0)))
+#plt.plot(ts, abs(np.fft.ifft(signal)))
+#plt.plot(ts, M0)
+#plt.show()
+
+t_g = 10
+t_len = 1000
+ts_3 = np.linspace(0, t_g+1.5*T_E, t_len)
+
+def M_plus_pysolve(x):
+    M_init = np.array([-1j])
+    B0 = 0
+    def omega_0(x,t):
+        grad_term = 0
+        if t_g <= t and t <= t_g+0.5*T_E:
+            grad_term = -gradient(1)*x
+        elif t_g+0.5*T_E < t and t <= t_g+1.5*T_E:
+            grad_term = gradient(1)*x
+        else:
+            grad_term = 0
+        return gamma * (B0 + grad_term)
+
+    def fun(t, y):
+        return [-1j*omega_0(x,t)*y[0] - 1/T2*y[0]]
+    sol = solve_ivp(fun, [0,t_g+1.5*T_E], M_init, t_eval = ts_3)
+    return np.array(sol.t), np.array(sol.y)
+
+def get_sig():
+    sum = 0
+    Ms = np.zeros((N,t_len), 'complex128')
+    for i in range(N):
+        Ms[i,:] = M_plus_pysolve(i)[1]
+    sum = np.sum(Ms, axis = 0)
+    return sum
+#print(get_sig())
+
+#plt.plot(ts_3, np.fft.ifft(get_sig()))
+#plt.vlines(t_g, -100, 100, colors='r')
+#plt.vlines(t_g+0.5*T_E, -100, 100, colors='r')
+#plt.vlines(t_g+1.5*T_E, -100, 100, colors='r')
+#plt.show()
